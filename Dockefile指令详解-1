@@ -1,0 +1,102 @@
+1. COPY <源路径>... <目标路径>
+<目标路径> 可以是容器内的绝对路径，也可以是相对于工作目录的相对路径（工作目录可以
+用 WORKDIR 指令来指定）。目标路径不需要事先创建，如果目录不存在会在复制文件前先行
+创建缺失目录。
+
+COPY package.json /usr/src/app/
+
+使用 COPY 指令，源文件的各种元数据都会保留。比如读、写、执
+行权限、文件变更时间等。这个特性对于镜像定制很有用。特别是构建相关文件都在使用 Git
+进行管理的时候。
+
+2. ADD 指令和 COPY 的格式和性质基本一致
+不推荐使用
+
+3. CMD ["可执行文件", "参数1", "参数2"...]
+Docker 不是虚拟机，容器就是进程。既然是进程，那么在启
+动容器的时候，需要指定所运行的程序及参数。 CMD 指令就是用于指定默认的容器主进程的
+启动命令的。
+
+在指令格式上，一般推荐使用 exec 格式，这类格式在解析时会被解析为 JSON 数组，因此
+一定要使用双引号 " ，而不要使用单引号。
+如果使用 shell 格式的话，实际的命令会被包装为 sh -c 的参数的形式进行执行:
+CMD echo $HOME  ===== CMD [ "sh", "-c", "echo $HOME" ]
+
+4. ENTRYPOINT 入口点
+ENTRYPOINT 的目的和 CMD 一样，都是在指定容器启动程序及参数。 ENTRYPOINT 在运行时
+也可以替代，不过比 CMD 要略显繁琐，需要通过 docker run 的参数 --entrypoint 来指
+定。
+当指定了 ENTRYPOINT 后， CMD 的含义就发生了改变，不再是直接的运行其命令，而是将
+CMD 的内容作为参数传给 ENTRYPOINT 指令，换句话说实际执行时，将变为：
+<ENTRYPOINT> "<CMD>"
+
+跟在
+镜像名后面的是 command ，运行时会替换 CMD 的默认值。因此这里的 -i 替换了原来的
+CMD ，而不是添加在原来的 curl -s http://ip.cn 后面。而 -i 根本不是命令，所以自然
+找不到。
+
+
+FROM ubuntu:16.04
+RUN apt-get update \
+&& apt-get install -y curl \
+&& rm -rf /var/lib/apt/lists/*
+CMD [ "curl", "-s", "http://ip.cn" ]
+
+FROM ubuntu:16.04
+RUN apt-get update \
+&& apt-get install -y curl \
+&& rm -rf /var/lib/apt/lists/*
+ENTRYPOINT [ "curl", "-s", "http://ip.cn" ]
+
+这是因为当存在 ENTRYPOINT 后， CMD 的内容将会作为参数传给
+ENTRYPOINT ，而这里 -i 就是新的 CMD ，因此会作为参数传给 curl ，从而达到了我们预
+期的效果。
+
+5.ENV 设置环境变量
+ENV VERSION=1.0 DEBUG=on \
+NAME="Happy Feet"
+
+
+6.VOLUME 定义匿名卷
+
+VOLUME /data
+
+运行时可以覆盖这个挂载设
+置。比如：
+docker run -d -v mydata:/data xxxx
+
+7. EXPOSE 声明端口,只是声明，不会做映射
+EXPOSE 指令是声明运行时容器提供服务端口，这只是一个声明，在运行时并不会因为这个声
+明应用就会开启这个端口的服务。
+
+-p ，是映射宿主端口和容器端口
+
+8.WORKDIR 指定工作目录
+使用 WORKDIR 指令可以来指定工作目录（或者称为当前目录），以后各层的当前目录就被改
+为指定的目录，如该目录不存在， WORKDIR 会帮你建立目录。
+
+RUN cd /app
+RUN echo "hello" > world.txt
+
+之前说过每一个 RUN 都是启动一个容器、执行命令、然后提交存储层文件变更。第一层 RUN
+cd /app 的执行仅仅是当前进程的工作目录变更，一个内存上的变化而已，其结果不会造成任
+何文件变更。而到第二层的时候，启动的是一个全新的容器，跟第一层的容器更完全没关
+系，自然不可能继承前一层构建过程中的内存变化。
+
+9.USER 指定当前用户
+USER 指令和 WORKDIR 相似，都是改变环境状态并影响以后的层。 WORKDIR 是改变工作目
+录， USER 则是改变之后层的执行 RUN , CMD 以及 ENTRYPOINT 这类命令的身份。
+当然，和 WORKDIR 一样， USER 只是帮助你切换到指定用户而已，这个用户必须是事先建立
+好的，否则无法切换。
+不要使用 su 或者 sudo ，这些都需要比较麻烦的配置，而且在 TTY 缺
+失的环境下经常出错。建议使用 gosu 。
+
+# 建立 redis 用户，并使用 gosu 换另一个用户执行命令
+RUN groupadd -r redis && useradd -r -g redis redis
+# 下载 gosu
+RUN wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.7/
+gosu-amd64" \
+&& chmod +x /usr/local/bin/gosu \
+&& gosu nobody true
+# 设置 CMD，并以另外的用户执行
+CMD [ "exec", "gosu", "redis", "redis-server" ]

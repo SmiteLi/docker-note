@@ -1,0 +1,57 @@
+1.HEALTHCHECK 健康检查
+HEALTHCHECK [选项] CMD <命令> ：设置检查容器健康状况的命令
+和 CMD , ENTRYPOINT 一样， HEALTHCHECK 只可以出现一次，如果写了多个，只有最后一个生
+效。
+命令的返回值决定了该次健康检查的成功与否： 0 ：成功； 1 ：失败； 2 ：
+保留，不要使用这个值。
+
+假设我们有个镜像是个最简单的 Web 服务，我们希望增加健康检查来判断其 Web 服务是否
+在正常工作，我们可以用 curl 来帮助判断，其 Dockerfile 的 HEALTHCHECK 可以这么写：
+HEALTHCHECK 健康检查
+
+FROM nginx
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+HEALTHCHECK --interval=5s --timeout=3s \
+CMD curl -fs http://localhost/ || exit 1
+
+2 多阶段构建
+编写 Dockerfile 文件
+
+FROM golang:1.9-alpine as builder
+RUN apk --no-cache add git
+WORKDIR /go/src/github.com/go/helloworld/
+RUN go get -d -v github.com/go-sql-driver/mysql
+COPY app.go .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app .
+FROM alpine:latest as prod
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=0 /go/src/github.com/go/helloworld/app .
+CMD ["./app"]
+
+docker build -t go/helloworld:3 .
+
+只构建某一阶段的镜像
+我们可以使用 as 来为某一阶段命名，例如
+FROM golang:1.9-alpine as builder
+Dockerfile 多阶段构建
+103
+例如当我们只想构建 builder 阶段的镜像时，我们可以在使用 docker build 命令时加上 -
+-target 参数即可
+$ docker build --target builder -t username/imagename:tag .
+
+上面例子中我们使用 COPY --from=0 /go/src/github.com/go/helloworld/app . 从上一阶段的镜
+像中复制文件，我们也可以复制任意镜像中的文件。
+$ COPY --from=nginx:latest /etc/nginx/nginx.conf /nginx.conf
+
+3 docker save和docker load
+使用 docker save 命令可以将镜像保存为归档文件。
+保存镜像的命令为：
+$ docker save alpine | gzip > alpine-latest.tar.gz
+然后我们将 alpine-latest.tar.gz 文件复制到了到了另一个机器上，可以用下面这个命令加
+载镜像：
+$ docker load -i alpine-latest.tar.gz
+
+如果我们结合这两个命令以及 ssh 甚至 pv 的话，利用 Linux 强大的管道，我们可以写一
+个命令完成从一个机器将镜像迁移到另一个机器，并且带进度条的功能：
+docker save <镜像名> | bzip2 | pv | ssh <用户名>@<主机名> 'cat | docker load'
